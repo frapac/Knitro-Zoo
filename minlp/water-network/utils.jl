@@ -12,5 +12,11 @@ function plot_network(; flow=nothing)
              lw= 5, zorder=1, color="red")
         end
     end
-    scatter(absn, ordn, c="k", s=200, zorder=2)
+
+    # Plot reservoirs.
+    scatter(absn[1:mr], ordn[1:mr], c="steelblue", s=200, zorder=2, label="Tank")
+    # Plot demands.
+    scatter(absn[mr+1:m], ordn[mr+1:m], c="k", s=200, zorder=2, label="Demand")
+
+    legend()
 end
