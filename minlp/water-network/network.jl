@@ -11,8 +11,15 @@ using JuMP, KNITRO
 
 #' Import data.
 include("data.jl");
-# Plotting utilities
-include("utils.jl");
+
+#' Plotting utilities
+using Pkg
+# Turn off by default.
+PLOT_GRAPH = false
+if haskey(Pkg.installed(), "PyPlot")
+    PLOT_GRAPH = true
+    include("utils.jl");
+end
 
 #' ## First case study: the non-linear problem
 #'
@@ -33,10 +40,12 @@ nx = n - md
 optimize!(model)
 
 #' Display results
-optimal_flow = JuMP.value.(q)
-fig = figure()
-plot_network(flow=optimal_flow)
-display(fig)
+if PLOT_GRAPH
+    optimal_flow = JuMP.value.(q)
+    fig = figure()
+    plot_network(flow=optimal_flow)
+    display(fig)
+end
 
 
 #' ## Extension to Mixed-integer non-linear programming
@@ -85,10 +94,12 @@ load_mip_model!(model)
 @time JuMP.optimize!(model)
 
 # Plot!
-optimal_flow = JuMP.value.(model[:q])
-fig = figure()
-plot_network(flow=optimal_flow)
-display(fig)
+if PLOT_GRAPH
+    optimal_flow = JuMP.value.(model[:q])
+    fig = figure()
+    plot_network(flow=optimal_flow)
+    display(fig)
+end
 
 #' Setting `mip_branchrule=2` and `mip_selectrule=3` seems to give
 #' better results, according to the tuner.
@@ -118,17 +129,20 @@ for nremove in 1:max_removals
     push!(cost_values, JuMP.objective_value(model))
 
     # Plot!
-    optimal_flow = JuMP.value.(model[:q])
-    fig = figure()
-    plot_network(flow=optimal_flow)
-    title("Optimal solution with $nremove removals")
-    display(fig)
+    if PLOT_GRAPH
+        optimal_flow = JuMP.value.(model[:q])
+        fig = figure()
+        plot_network(flow=optimal_flow)
+        title("Optimal solution with $nremove removals")
+        display(fig)
+    end
 end
 
 #' Plot evolution of costs w.r.t. number of removals.
-fig = figure()
-plot(1:max_removals, cost_values, lw=3, c="k")
-xlabel("#removals")
-ylabel("Objective value")
-display(fig)
-
+if PLOT_GRAPH
+    fig = figure()
+    plot(1:max_removals, cost_values, lw=3, c="k")
+    xlabel("#removals")
+    ylabel("Objective value")
+    display(fig)
+end
