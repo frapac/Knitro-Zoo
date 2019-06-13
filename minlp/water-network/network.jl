@@ -11,6 +11,8 @@ using JuMP, KNITRO
 
 #' Import data.
 include("data.jl");
+# Plotting utilities
+include("utils.jl");
 
 #' ## First case study: the non-linear problem
 #'
@@ -27,15 +29,21 @@ nx = n - md
 @variable(model, q[1:n])
 @constraint(model, q .== q0 + B*qc)
 @NLobjective(model, Min,
-            sum(r[i] * abs(q[i]) * q[i]^2 / 3 + α1[i] * q[i] for i in 1:n))
+             sum(r[i] * abs(q[i]) * q[i]^2 / 3 + α1[i] * q[i] for i in 1:n))
 optimize!(model)
+
+#' Display results
+optimal_flow = JuMP.value.(q)
+fig = figure()
+plot_network(flow=optimal_flow)
+display(fig)
 
 
 #' ## Extension to Mixed-integer non-linear programming
 
 #' We define hereafter the MINLP version of the problem.
 # Add a maximum flows through the pipes
-QMAX = 10.
+const QMAX = 10.
 
 function load_mip_model!(model::JuMP.Model; nremovals=3)
     @variable(model, qc[1:nx])
@@ -49,7 +57,7 @@ function load_mip_model!(model::JuMP.Model; nremovals=3)
 
     @NLobjective(model, Min,
                 sum(r[i] * abs(q[i]) * q[i]^2 / 3 + α1[i] * q[i] for i in 1:n))
-
+    return
 end
 
 #' ### Default Knitro
@@ -76,19 +84,51 @@ model = Model(with_optimizer(KNITRO.Optimizer, outlev=3, tuner=1))
 load_mip_model!(model)
 @time JuMP.optimize!(model)
 
-#' Setting `mip_branchrule=2` and `mip_selectrule=2` seems to give
-#' better results.
-model = JuMP.direct_model(KNITRO.Optimizer(mip_zerohalf=3))
+# Plot!
+optimal_flow = JuMP.value.(model[:q])
+fig = figure()
+plot_network(flow=optimal_flow)
+display(fig)
+
+#' Setting `mip_branchrule=2` and `mip_selectrule=3` seems to give
+#' better results, according to the tuner.
+#' Note that setting `outlev` to 0 switch off Knitro's output.
+mip_solver = with_optimizer(KNITRO.Optimizer, mip_knapsack=0, mip_branchrule=2,
+                            mip_selectrule=3, outlev=0)
+model = Model(mip_solver)
 load_mip_model!(model)
 @time JuMP.optimize!(model)
 
-#' The fewer arcs, the harder the problem.
-# With 5 arcs removed.
-model = Model(with_optimizer(KNITRO.Optimizer, outlev=0))
-load_mip_model!(model, nremovals=5)
-@time JuMP.optimize!(model)
 
-# With 7 arcs removed.
-model = Model(with_optimizer(KNITRO.Optimizer, outlev=0))
-load_mip_model!(model, nremovals=7)
-@time JuMP.optimize!(model)
+#' ### Quantify impact of arcs' removals
+
+#' The fewer arcs, the harder the problem.
+#' If `nremovals >= 10`, the problem becomes infeasible.
+max_removals = 9
+# Save results in some arrays.
+solve_time  = Float64[]
+cost_values = Float64[]
+
+for nremove in 1:max_removals
+    println("Remove ", nremove, " arcs from graph.")
+    model = Model(mip_solver)
+    load_mip_model!(model, nremovals=nremove)
+    @time JuMP.optimize!(model)
+
+    push!(cost_values, JuMP.objective_value(model))
+
+    # Plot!
+    optimal_flow = JuMP.value.(model[:q])
+    fig = figure()
+    plot_network(flow=optimal_flow)
+    title("Optimal solution with $nremove removals")
+    display(fig)
+end
+
+#' Plot evolution of costs w.r.t. number of removals.
+fig = figure()
+plot(1:max_removals, cost_values, lw=3, c="k")
+xlabel("#removals")
+ylabel("Objective value")
+display(fig)
+
