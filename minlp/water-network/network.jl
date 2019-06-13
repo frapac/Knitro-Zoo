@@ -21,7 +21,7 @@
 #' We suppose that the network has $r$ tanks storing some waters to fulfill
 #' the demands in $d$ nodes, distinct from the tanks. We split the set of nodes $N$ accordingly:
 #' $$
-#' N = N_r \subset N_d.
+#' N = N_r \cup N_d.
 #' $$
 #'
 #' We suppose further that the graph is *connected*, implying
@@ -36,11 +36,33 @@
 #' - $r$ (given), the vector of resistances in all arcs
 #' - $q$, the vector of flows across arcs
 #'
+#' ### Constraints
 #' The first Kirchhoff law states that:
 #' $$
 #' A q -f = 0,
 #' $$
 #' as we suppose that no accumulation occurs in the nodes.
+#' The second Kirchhoff law takes into account the losses in the pipes,
+#' which is given on each arc by the function $\phi_{alpha}$ (corresponding
+#' to the Colebrooks law):
+#' $$
+#' \phi_{\alpha}(q_\alpha) = r_\alpha q_\alpha | q_\alpha |
+#' $$
+#' The second Kirchhoff law writes, in a vectorial manner,
+#' $$
+#' A^\top p + r \circ q \circ | q | = 0
+#' $$
+#'
+#' ### Objective
+#' On each arc $\alpha$, we define the energy function $\Phi_\alpha$
+#' as
+#' $$
+#' \Phi_\alpha(q_\alpha) = \dfrac{1}{3} r_\alpha q_\alpha^2 | q_\alpha |
+#' $$
+#' On the graph, the overall energy write
+#' $$
+#' J(q, f_r) = \dfrac{1}{3} q^\top (r \circ q \circ | q |) + p_r^\top f_r
+#' $$
 
 
 
@@ -149,6 +171,15 @@ model = Model(with_optimizer(KNITRO.Optimizer, outlev=3))
 load_mip_model!(model)
 @time JuMP.optimize!(model)
 
+#' We plot the solution by displaying in red the arcs removed from the graph.
+# Plot!
+if PLOT_GRAPH
+    optimal_flow = JuMP.value.(model[:q])
+    fig = figure()
+    plot_network(flow=optimal_flow)
+    display(fig)
+end
+
 #' In the resolving, Knitro uses the Branch & Bound algorithm to find
 #' the optimal solution corresponding to the (convex) MINLP problem.
 #' We refer to the [documentation](https://www.artelys.com/docs/knitro/2_userGuide/minlp.html)
@@ -169,13 +200,6 @@ model = Model(with_optimizer(KNITRO.Optimizer, outlev=3, tuner=1))
 load_mip_model!(model)
 @time JuMP.optimize!(model)
 
-# Plot!
-if PLOT_GRAPH
-    optimal_flow = JuMP.value.(model[:q])
-    fig = figure()
-    plot_network(flow=optimal_flow)
-    display(fig)
-end
 
 #' Setting `mip_branchrule=2` and `mip_selectrule=3` seems to give
 #' better results, according to the tuner.
@@ -190,8 +214,23 @@ load_mip_model!(model)
 #' ### Quantify impact of arcs' removals
 
 #' The fewer arcs, the harder the problem.
-#' If `nremovals >= 10`, the problem becomes infeasible.
+#' If `nremovals >= 10`, Knitro takes too long to solve the problem.
+#' However, the problem remains feasible till n_removals = 13.
+#' Compute for instance the solution of the following problem:
+feas_model = Model(with_optimizer(KNITRO.Optimizer))
+@variable(feas_model, qc[1:nx])
+@variable(feas_model, q[1:n])
+@constraint(feas_model, q .== q0 + B*qc)
+@variable(feas_model, z[1:n], Bin)
+@constraint(feas_model,  q .<= QMAX * z)
+@constraint(feas_model, -q .<= QMAX * z)
+@objective(feas_model, Min, sum(z))
+
+
+#' We know study the evolution of the objective cost w.r.t. the
+#' number of removals.
 max_removals = 9
+
 # Save results in some arrays.
 solve_time  = Float64[]
 cost_values = Float64[]
