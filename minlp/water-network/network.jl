@@ -5,21 +5,22 @@
 #'
 #' The problem studied hereafter was originally designed by
 #' Pierre Carpentier, for educational purposes.
-#' The original code is available [here](http://perso.ensta-paristech.fr/~pcarpent/TP_Reseau/ENSMP/)
+#' The original code is available [here](http://perso.ensta-paristech.fr/~pcarpent/TP_Reseau/ENSMP/).
 #' The author credits him for the following tutorial.
 #'
 #' # Description of the problem
 #'
 #' The tutorial studies the optimization of water flows in a water
-#' distribution network (in a steady state). The optimizer aims at
+#' distribution network (at steady state). The optimizer aims at
 #' minimizing the network's energy while statisfying some linear constraints
-#' corresponding to the Kirchhoff first law.
+#' corresponding to Kirchhoff's first law.
 #'
-#' Let $G = (N, A)$ be an oriented graph. We note $n = |A|$ the number of
+#' Let $G = (N, E)$ be an oriented graph. We note $n = |E|$ the number of
 #' arcs and $m = |N|$ the number of nodes in this graph.
 #'
 #' We suppose that the network has $r$ tanks storing some waters to fulfill
-#' the demands in $d$ nodes, distinct from the tanks. We split the set of nodes $N$ accordingly:
+#' the demands in $d$ nodes (distinct from the tanks).
+#' We split the set of nodes $N$ accordingly:
 #' $$
 #' N = N_r \cup N_d.
 #' $$
@@ -31,19 +32,22 @@
 #' We note $A \in R^{m \times n}$ the incidence matrix of the graph.
 #'
 #' Lets introduce physical variables to describe further the water network.
-#' - $f$ (given), the vector of flows at nodes (that is, the demands)
-#' - $p$ (given), the vector of pressures at nodes
-#' - $r$ (given), the vector of resistances in all arcs
-#' - $q$, the vector of flows across arcs
+#' - the vector of resulting flows at nodes, denoted $f = (f_d, f_r)$. $f_d$ is given for demands' nodes.
+#' - the vector of pressures at nodes, denoted $p = (p_d, p_r)$. Pressures $p_r$ are given for the reservoirs.
+#' - the vector of resistances in all arcs, denoted $r$ (parameters of the problem)
+#' - the vector of flows across arcs, denoted $q$.
+#'
+#' The decision variable is the vector of flows $q$.
 #'
 #' ### Constraints
+#'
 #' The first Kirchhoff law states that:
 #' $$
 #' A q -f = 0,
 #' $$
 #' as we suppose that no accumulation occurs in the nodes.
 #' The second Kirchhoff law takes into account the losses in the pipes,
-#' which is given on each arc by the function $\phi_{alpha}$ (corresponding
+#' which is given on each arc by a function $\phi_{alpha}$ (corresponding
 #' to the Colebrooks law):
 #' $$
 #' \phi_{\alpha}(q_\alpha) = r_\alpha q_\alpha | q_\alpha |
@@ -59,9 +63,38 @@
 #' $$
 #' \Phi_\alpha(q_\alpha) = \dfrac{1}{3} r_\alpha q_\alpha^2 | q_\alpha |
 #' $$
-#' On the graph, the overall energy write
+#' On the graph, the overall energy equates
 #' $$
 #' J(q, f_r) = \dfrac{1}{3} q^\top (r \circ q \circ | q |) + p_r^\top f_r
+#' $$
+#'
+#' The global problem writes
+#' $$
+#' \min_{q} \dfrac{1}{3} q^\top (r \circ q \circ | q |) + p_r^\top f_r \qquad
+#' s.t. \quad Aq  - f = 0
+#' $$
+#'
+#' ### Reformulation
+#' By applying some mathematical tricks, we are able to reformulate
+#' the problem in the following manner.
+#'
+#' By considering some properties of the overall graph, we split the vector
+#' of flows in two $q = (q_T, q_C)$, where $q_T$ depends linearly on $q_C$.
+#' Then, we are able to prove the existence of a matrix $B$ and a fixed
+#' vector $q_0$ such that the vector of flows on arcs writes
+#' $$
+#' q = q_0 + B \; q_C
+#' $$
+#' By using this formulation, we can reduce the dimension of the search
+#' space by selecting as decision variable the subvector $q_C$ instead of $q$.
+#'
+#' Note that the problem becomes also constraint-free, as the vector $q$
+#' statisfying the previous equation sastifies also the first Kirchhoff law.
+#'
+#' We reformulate the optimization problem as
+#' $$
+#' \min_{q_c} \dfrac{1}{3} q^\top (r \circ q \circ | q |) + p_r^\top f_r \qquad
+#' s.t. \quad q = q_0 + B q_C
 #' $$
 
 
@@ -90,7 +123,7 @@ end
 #' ## First case study: the non-linear problem
 #'
 #' Define Knitro Optimizer with JuMP.
-model = Model(with_optimizer(KNITRO.Optimizer, presolve=0, outlev=3, algorithm=4))
+model = Model(with_optimizer(KNITRO.Optimizer, outlev=3))
 
 #' Write non-linear optimization problem first.
 # Parameters.
@@ -100,7 +133,7 @@ nx = n - md
 @variable(model, qc[1:nx])
 # Add dummy variable in the model...
 @variable(model, q[1:n])
-# ... as we restrict the problem inside a 9-dimensional manifold.
+# ... as we restrict the problem inside a 9-dimensional manifold:
 @constraint(model, q .== q0 + B*qc)
 @NLobjective(model, Min,
              sum(r[i] * abs(q[i]) * q[i]^2 / 3 + α1[i] * q[i] for i in 1:n))
@@ -156,11 +189,23 @@ function load_mip_model!(model::JuMP.Model; nremovals=3)
     return
 end
 
-#' **Remark:** Note that the constraint
+#' **Optimization related remark:** Note that the constraint
 #' $$
 #' | q | \leq q_{max} \; z
 #' $$
-#' could be reformulated as a complementarity constraint.
+#' could be reformulated as a complementarity constraint (also supported by Knitro
+#' but not natively by JuMP).
+
+#' **Physics related remark:** We are a bit loosy with the physics of the
+#' problem if we remove the arcs in the previous manner. Imagine that for
+#' a given arc $a \in E$, $z_a =0$ thus implying $q_a =0$. Then, if we
+#' note $i$ and $j$ the two adjacent nodes, the physics tells us that
+#' $$
+#' p_i = 0 \, \quad p_j = 0 ,
+#' $$
+#' which is not the case if we solve the previous optimization problem.
+#' However, the goal of this tutorial is purely pedagogical and as a
+#' consequence we allow us to play a bit with the physics.
 
 
 #' ### Default Knitro
@@ -186,7 +231,8 @@ end
 #' for further details.
 #' The approach used here is different than in BONMIN (outer approximation).
 
-#' Observe that Knitro default computes 165 nodes before finding the solution.
+#' Observe that Knitro with default options computes 165 nodes before
+#' finding the solution.
 #' Is it possible to find a better tuning for Knitro?
 
 #' ### MIP-Tuner
@@ -232,7 +278,6 @@ feas_model = Model(with_optimizer(KNITRO.Optimizer))
 max_removals = 9
 
 # Save results in some arrays.
-solve_time  = Float64[]
 cost_values = Float64[]
 
 for nremove in 1:max_removals
